@@ -22,7 +22,6 @@ export const palette = {
   base: '#1e1e2e',
 };
 
-// 2. CONFIGURACIÓN SEMÁNTICA
 export const theme = {
   primary: chalk.hex(palette.mauve).bold,
   success: chalk.hex(palette.green).bold,
@@ -43,9 +42,8 @@ export const theme = {
     check: '✓',
   },
 
-  // Configuración del Spinner (ora)
   spinner: {
-    color: 'magenta', // 'magenta' es lo más cercano a Mauve/Pink en la terminal
+    color: 'magenta',
     type: 'dots',
   },
 } as const;

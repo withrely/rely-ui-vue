@@ -37,7 +37,6 @@ export function checkVueProject() {
 export function checkAliasConfig() {
   const cwd = process.cwd();
   const tsconfigPath = path.join(cwd, 'tsconfig.json');
-  // Algunos proyectos usan jsconfig.json
   const jsconfigPath = path.join(cwd, 'jsconfig.json');
 
   const configPath = fs.existsSync(tsconfigPath)
@@ -56,12 +55,9 @@ export function checkAliasConfig() {
   }
 
   try {
-    // Leemos el archivo (cuidado: JSON.parse falla si hay comentarios en el json,
-    // pero para una validación rápida suele bastar en entornos estándar)
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const paths = config.compilerOptions?.paths || {};
 
-    // Buscamos si existe "@/*" o "@"
     if (!paths['@/*'] && !paths['@']) {
       console.log(
         chalk.yellow(
@@ -79,7 +75,5 @@ export function checkAliasConfig() {
       );
       console.log(chalk.dim(`   "paths": {\n     "@/*": ["./src/*"]\n   }\n`));
     }
-  } catch (e) {
-    // Si falla el parseo (por comentarios en JSON), lo ignoramos silenciosamente
-  }
+  } catch (e) {}
 }
