@@ -2,7 +2,7 @@ name: Deploy Registry
 
 on:
   push:
-    branches: ["main"]
+    branches: ['main']
   workflow_dispatch:
 
 permissions:
@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: 'pages'
   cancel-in-progress: false
 
 jobs:
@@ -21,20 +21,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: 'pnpm'
+          node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: pnpm install
+        run: npm install
 
       - name: Build Registry
-        run: pnpm build:registry
+        run: npm run build:registry
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

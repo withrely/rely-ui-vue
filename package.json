@@ -1,10 +1,17 @@
 {
   "name": "rely-ui-vue",
   "description": "",
-  "version": "0.1.0",
-  "type": "module",
+  "version": "0.1.1",
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
   "bin": {
-    "rely-ui-vue": "./dist/cli.js"
+    "mi-comando": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
   },
   "files": [
     "dist",
@@ -25,11 +32,11 @@
   ],
   "author": "yxsifdev",
   "license": "ISC",
-  "packageManager": "pnpm@10.29.2",
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/figlet": "^1.7.0",
     "@types/fs-extra": "^11.0.4",
+    "@types/node": "^25.2.3",
     "@types/prompts": "^2.4.9",
     "eslint": "^9.39.2",
     "eslint-plugin-prettier": "^5.5.5",

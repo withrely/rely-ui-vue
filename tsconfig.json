@@ -1,21 +1,38 @@
 {
   "compilerOptions": {
+    // Salida
     "outDir": "dist",
-    "rootDir": ".",
-    "declarationDir": "./dist/types",
-    "target": "esnext",
-    "module": "esnext",
-    "moduleResolution": "bundler",
+    "declarationDir": "dist",
     "declaration": true,
-    "skipLibCheck": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    
+    // Módulos - IMPORTANTE para npm packages
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ES2020"],
+    
+    // Interoperabilidad
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
+    
+    // Calidad de código
     "strict": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    
+    // Paths - QUITA ESTO si vas a publicar
+    // Los path aliases no funcionan bien en packages publicados
+    // "baseUrl": ".",
+    // "paths": {
+    //   "@/*": ["src/*"]
+    // }
   },
-  "include": ["src/**/*", "types/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
 }

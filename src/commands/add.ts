@@ -1,13 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import ora, { Ora, type Color } from 'ora'; // Importamos tipos
+import ora, { Ora, type Color } from 'ora';
 import prompts from 'prompts';
 import { checkVueProject, checkAliasConfig } from '../utils/checks';
 import { logger } from '../utils/logger';
-import { theme } from '../utils/theme'; // Importamos el tema central
+import { theme } from '../utils/theme';
 
-// ⚠️ URL DE TU REGISTRO
-const REGISTRY_BASE_URL = 'http://localhost:3000/registry';
+const REGISTRY_BASE_URL = 'https://withrely.github.io/rely-ui-vue/registry';
 
 interface RegistryItem {
   name: string;
@@ -24,12 +23,10 @@ interface InstallResult {
 }
 
 export async function add(components: string[]) {
-  // 1. Validaciones
   logger.break();
   checkVueProject();
   checkAliasConfig();
 
-  // 2. Selección interactiva
   if (!components || components.length === 0) {
     const response = await prompts({
       type: 'text',
@@ -43,16 +40,14 @@ export async function add(components: string[]) {
     components = response.component.split(' ').map((c: string) => c.trim());
   }
 
-  // 3. Inicialización del Spinner ÚNICO
   const results: InstallResult[] = [];
   const processed = new Set<string>();
 
   logger.step(`Analizando solicitud...`);
 
-  // Creamos el spinner aquí UNA VEZ
   const spinner = ora({
     text: theme.text('Iniciando...'),
-    color: theme.spinner.color as Color, // Usamos el color definido en theme.ts
+    color: theme.spinner.color as Color,
     spinner: theme.spinner.type as any,
   }).start();
 
@@ -61,10 +56,8 @@ export async function add(components: string[]) {
       await processComponent(component, processed, results, spinner);
     }
 
-    // Al final de todo el bucle, detenemos el spinner si seguía corriendo
     spinner.stop();
 
-    // 4. Resumen Final
     printSummary(results);
   } catch (error) {
     spinner.fail('Ocurrió un error inesperado.');
@@ -73,30 +66,26 @@ export async function add(components: string[]) {
   }
 }
 
-// --- LÓGICA RECURSIVA ---
 
 async function processComponent(
   name: string,
   processed: Set<string>,
   results: InstallResult[],
-  spinner: Ora, // Recibimos el spinner existente
+  spinner: Ora,
   parent?: string,
 ) {
   if (processed.has(name)) return;
   processed.add(name);
 
-  // Actualizamos el texto del spinner (sin crear uno nuevo)
   spinner.text = parent
     ? `Resolviendo dependencia ${logger.highlight(name)} (para ${parent})...`
     : `Buscando componente ${logger.highlight(name)}...`;
 
   try {
-    // A. FETCH
     const res = await fetch(`${REGISTRY_BASE_URL}/${name}.json`);
 
     if (!res.ok) {
       if (res.status === 404) {
-        // Usamos .stopAndPersist para dejar un mensaje de error sin romper el spinner principal
         spinner.stopAndPersist({
           symbol: theme.error(theme.icons.error),
           text: `El componente "${name}" no existe en el registro.`,
@@ -107,49 +96,41 @@ async function processComponent(
           text: `Error de red al buscar "${name}".`,
         });
       }
-      // Reiniciamos el spinner para el siguiente componente si lo hubiera
       spinner.start();
       return;
     }
 
     const data = (await res.json()) as RegistryItem;
 
-    // B. DEPENDENCIAS (Recursividad)
     if (data.registryDependencies.length > 0) {
       spinner.text = `Verificando dependencias de ${logger.highlight(name)}...`;
       for (const dep of data.registryDependencies) {
-        // Pasamos el MISMO spinner hacia abajo
         await processComponent(dep, processed, results, spinner, name);
 
-        // Al volver de la recursión, actualizamos el texto para decir que volvimos al padre
         spinner.text = `Continuando con ${logger.highlight(name)}...`;
       }
     }
 
-    // C. RUTAS
     const cwd = process.cwd();
     const targetBase =
       data.type === 'components:core'
         ? path.join(cwd, 'src/components/core')
-        : path.join(cwd, 'src/components/ui'); // Ajusta "ui" o "buttons" según tu gusto
+        : path.join(cwd, 'src/components/ui');
 
     const targetDir = path.join(targetBase, data.name);
 
-    // D. INTEGRIDAD
     const integrity = checkFilesIntegrity(targetDir, data.files);
 
     if (integrity.status === 'ok') {
-      // Éxito: Saltado
       spinner.stopAndPersist({
-        symbol: '⏭️ ', // Un símbolo distinto para saltados
+        symbol: '⏭️ ',
         text: `${logger.highlight(name)} ya existe y está completo. ${logger.subtle('(Saltado)')}`,
       });
       results.push({ name, status: 'skipped', path: targetDir });
-      spinner.start(); // Reiniciamos para el siguiente
+      spinner.start();
       return;
     }
 
-    // E. INSTALACIÓN / REPARACIÓN
     spinner.text =
       integrity.status === 'missing_files'
         ? `Reparando ${logger.highlight(name)}...`
@@ -167,29 +148,24 @@ async function processComponent(
     const finalStatus =
       integrity.status === 'missing_files' ? 'repaired' : 'installed';
 
-    // Éxito: Instalado
     spinner.succeed(
       `${logger.highlight(name)} ${finalStatus === 'installed' ? 'instalado' : 'reparado'} correctamente.`,
     );
 
     results.push({ name, status: finalStatus, path: targetDir });
 
-    // Mensaje de dependencias NPM (sin spinner)
     if (data.dependencies.length > 0 && finalStatus === 'installed') {
       console.log(
         `   ${logger.subtle('└─ Requiere:')} ${logger.highlight(data.dependencies.join(', '))}`,
       );
     }
 
-    // Reiniciamos spinner por si el bucle del padre continúa
     spinner.start();
   } catch (error) {
     spinner.fail(`Falló al procesar ${name}`);
     console.error(error);
   }
 }
-
-// --- UTILIDADES ---
 
 function checkFilesIntegrity(
   targetDir: string,
@@ -214,7 +190,6 @@ function printSummary(results: InstallResult[]) {
   const repaired = results.filter((r) => r.status === 'repaired');
   const skipped = results.filter((r) => r.status === 'skipped');
 
-  // INSTALADOS (Verde)
   if (installed.length > 0) {
     console.log(theme.success('Instalados correctamente:'));
     installed.forEach((r) => {
@@ -226,7 +201,6 @@ function printSummary(results: InstallResult[]) {
     logger.break();
   }
 
-  // REPARADOS (Amarillo)
   if (repaired.length > 0) {
     console.log(theme.warning('Reparados (archivos restaurados):'));
     repaired.forEach((r) => {
@@ -237,7 +211,6 @@ function printSummary(results: InstallResult[]) {
     logger.break();
   }
 
-  // OMITIDOS (Azul/Gris)
   if (skipped.length > 0) {
     console.log(theme.primary('Sin cambios (ya actualizados):'));
     skipped.forEach((r) => {
@@ -248,7 +221,6 @@ function printSummary(results: InstallResult[]) {
     logger.break();
   }
 
-  // MENSAJE FINAL
   console.log(theme.highlight('  Todo listo. Happy coding! 🚀'));
   logger.break();
 }
