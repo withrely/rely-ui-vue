@@ -1,6 +1,7 @@
 {
   "name": "rely-ui-vue",
   "description": "",
+  "type": "module",
   "version": "0.1.1",
   "main": "./dist/cli.js",
   "types": "./dist/cli.d.ts",
