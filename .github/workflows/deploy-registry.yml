@@ -30,7 +30,6 @@ jobs:
           node-version: "20"
           cache: 'pnpm'
 
-      # 3. Ahora sí puedes usar pnpm
       - name: Install dependencies
         run: pnpm install
 
