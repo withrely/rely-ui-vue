@@ -1,226 +1,269 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import ora, { Ora, type Color } from 'ora';
+import { execSync } from 'node:child_process';
+import ora from 'ora';
 import prompts from 'prompts';
-import { checkVueProject, checkAliasConfig } from '../utils/checks';
+import { getConfig, resolveConfigPaths } from '../utils/config';
+import { getMissingDependencies } from '../utils/dependencies';
 import { logger } from '../utils/logger';
 import { theme } from '../utils/theme';
 
-const REGISTRY_BASE_URL = 'https://withrely.github.io/rely-ui-vue/registry';
+// ⚠️ CAMBIAR A URL REAL EN PROD
+const REGISTRY_BASE_URL = 'http://localhost:1234/registry';
+
+// 1. Definimos la forma de los datos (Para arreglar el error 'unknown')
+type RegistryType = 'components:ui' | 'components:core' | 'components:lib';
 
 interface RegistryItem {
   name: string;
-  type: 'components:ui' | 'components:core';
+  type: RegistryType;
   dependencies: string[];
   registryDependencies: string[];
   files: Array<{ name: string; content: string }>;
 }
 
-interface InstallResult {
-  name: string;
-  status: 'installed' | 'skipped' | 'repaired';
-  path: string;
-}
-
 export async function add(components: string[]) {
-  logger.break();
-  checkVueProject();
-  checkAliasConfig();
+  // 1. Cargar Configuración (La Memoria del Proyecto)
+  const config = getConfig();
 
+  if (!config) {
+    logger.break();
+    console.log(theme.error('El proyecto no está configurado.'));
+    console.log(
+      theme.muted(
+        `Por favor ejecuta primero: ${theme.primary('npx rely-ui-vue init')}`,
+      ),
+    );
+    process.exit(1);
+  }
+
+  // 2. Si no hay argumentos, preguntar interactivamente
   if (!components || components.length === 0) {
+    logger.break();
     const response = await prompts({
       type: 'text',
       name: 'component',
       message: '¿Qué componente deseas instalar?',
-      validate: (value) =>
-        value.length > 0 ? true : 'Debes escribir un nombre.',
+      hint: 'ej: button input card',
+      validate: (v) => v.length > 0 || 'Debes escribir un nombre.',
     });
 
-    if (!response.component) process.exit(0);
+    if (!response.component) {
+      console.log(theme.muted('Operación cancelada.'));
+      process.exit(0);
+    }
     components = response.component.split(' ').map((c: string) => c.trim());
   }
 
-  const results: InstallResult[] = [];
+  // 3. Preparar Entorno
+  const spinner = ora(theme.text('Iniciando...')).start();
+  const paths = resolveConfigPaths(process.cwd(), config);
+
+  // Sets para evitar duplicados y recursión infinita
+  const npmDeps = new Set<string>();
   const processed = new Set<string>();
-
-  logger.step(`Analizando solicitud...`);
-
-  const spinner = ora({
-    text: theme.text('Iniciando...'),
-    color: theme.spinner.color as Color,
-    spinner: theme.spinner.type as any,
-  }).start();
+  const results: { name: string; status: 'installed' | 'skipped' | 'error' }[] =
+    [];
 
   try {
+    // 4. Procesar Componentes (Loop Principal)
     for (const component of components) {
-      await processComponent(component, processed, results, spinner);
+      await processComponent(
+        component,
+        paths,
+        processed,
+        results,
+        npmDeps,
+        spinner,
+      );
     }
 
-    spinner.stop();
+    spinner.stop(); // Detenemos spinner antes de preguntar
 
+    // 5. Instalar Dependencias NPM (Si faltan)
+    const missingDeps = getMissingDependencies([...npmDeps]);
+
+    if (missingDeps.length > 0) {
+      logger.break();
+      console.log(theme.warning(' Dependencias necesarias detectadas:'));
+      console.log(theme.muted(` ${missingDeps.join(', ')}`));
+
+      const { confirm } = await prompts({
+        type: 'confirm',
+        name: 'confirm',
+        message: '¿Deseas instalarlas ahora?',
+        initial: true,
+      });
+
+      if (confirm) {
+        const s = ora('Instalando paquetes...').start();
+        const pm = getPackageManager();
+        const cmd = pm === 'npm' ? 'install' : 'add';
+
+        try {
+          execSync(`${pm} ${cmd} ${missingDeps.join(' ')}`, {
+            stdio: 'ignore',
+          });
+          s.succeed('Dependencias instaladas correctamente.');
+        } catch (e) {
+          s.fail('Error al instalar dependencias.');
+          console.log(
+            theme.muted(
+              `Ejecuta manual: ${pm} ${cmd} ${missingDeps.join(' ')}`,
+            ),
+          );
+        }
+      }
+    }
+
+    // 6. Resumen Final
     printSummary(results);
   } catch (error) {
     spinner.fail('Ocurrió un error inesperado.');
-    console.error(error);
+    if (error instanceof Error) console.error(theme.muted(error.message));
     process.exit(1);
   }
 }
 
-
+/**
+ * Función Recursiva para descargar componentes y sus sub-dependencias
+ */
 async function processComponent(
   name: string,
+  paths: any, // Rutas resueltas desde rely.json
   processed: Set<string>,
-  results: InstallResult[],
-  spinner: Ora,
+  results: any[],
+  npmDeps: Set<string>,
+  spinner: any,
   parent?: string,
 ) {
   if (processed.has(name)) return;
   processed.add(name);
 
   spinner.text = parent
-    ? `Resolviendo dependencia ${logger.highlight(name)} (para ${parent})...`
-    : `Buscando componente ${logger.highlight(name)}...`;
+    ? `Resolviendo ${theme.highlight(name)} (para ${parent})...`
+    : `Buscando ${theme.highlight(name)}...`;
 
   try {
+    // A. FETCH
     const res = await fetch(`${REGISTRY_BASE_URL}/${name}.json`);
 
     if (!res.ok) {
       if (res.status === 404) {
-        spinner.stopAndPersist({
-          symbol: theme.error(theme.icons.error),
-          text: `El componente "${name}" no existe en el registro.`,
-        });
-      } else {
-        spinner.stopAndPersist({
-          symbol: theme.error(theme.icons.error),
-          text: `Error de red al buscar "${name}".`,
-        });
+        if (parent) throw new Error(`Dependencia rota: "${name}" no existe.`);
+        spinner.fail(`Componente "${name}" no encontrado.`);
+        return;
       }
-      spinner.start();
-      return;
+      throw new Error(`Error de red: ${res.status}`);
     }
 
+    // B. CASTING DE TIPOS (Aquí arreglamos el error 'unknown')
     const data = (await res.json()) as RegistryItem;
 
-    if (data.registryDependencies.length > 0) {
-      spinner.text = `Verificando dependencias de ${logger.highlight(name)}...`;
-      for (const dep of data.registryDependencies) {
-        await processComponent(dep, processed, results, spinner, name);
+    // C. ACUMULAR DEPENDENCIAS NPM
+    data.dependencies.forEach((d) => npmDeps.add(d));
 
-        spinner.text = `Continuando con ${logger.highlight(name)}...`;
+    // D. RECURSIVIDAD (Dependencias internas)
+    if (data.registryDependencies) {
+      for (const dep of data.registryDependencies) {
+        await processComponent(
+          dep,
+          paths,
+          processed,
+          results,
+          npmDeps,
+          spinner,
+          name,
+        );
+        spinner.text = `Retomando ${theme.highlight(name)}...`;
       }
     }
 
-    const cwd = process.cwd();
-    const targetBase =
-      data.type === 'components:core'
-        ? path.join(cwd, 'src/components/core')
-        : path.join(cwd, 'src/components/ui');
+    // E. DETERMINAR RUTA DE DESTINO
+    // Usamos las rutas que vienen de rely.json (paths)
+    let targetDir = '';
+    let isFile = false;
 
-    const targetDir = path.join(targetBase, data.name);
-
-    const integrity = checkFilesIntegrity(targetDir, data.files);
-
-    if (integrity.status === 'ok') {
-      spinner.stopAndPersist({
-        symbol: '⏭️ ',
-        text: `${logger.highlight(name)} ya existe y está completo. ${logger.subtle('(Saltado)')}`,
-      });
-      results.push({ name, status: 'skipped', path: targetDir });
-      spinner.start();
-      return;
+    switch (data.type) {
+      case 'components:ui':
+        targetDir = path.join(paths.ui, data.name); // src/components/ui/button
+        break;
+      case 'components:core':
+        targetDir = path.join(paths.core, data.name); // src/components/core/primitive
+        break;
+      case 'components:lib':
+        // Caso especial: utils.ts va suelto en src/lib, no en src/lib/utils/
+        targetDir = paths.lib;
+        isFile = true;
+        break;
+      default:
+        targetDir = path.join(paths.ui, data.name);
     }
 
-    spinner.text =
-      integrity.status === 'missing_files'
-        ? `Reparando ${logger.highlight(name)}...`
-        : `Instalando ${logger.highlight(name)}...`;
-
+    // F. INSTALAR ARCHIVOS
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
 
+    let installedCount = 0;
+
     for (const file of data.files) {
       const filePath = path.join(targetDir, file.name);
-      fs.writeFileSync(filePath, file.content);
+
+      // NO SOBRESCRIBIR: Si ya existe, lo respetamos (Shadcn philosophy)
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, file.content);
+        installedCount++;
+      }
     }
 
-    const finalStatus =
-      integrity.status === 'missing_files' ? 'repaired' : 'installed';
-
-    spinner.succeed(
-      `${logger.highlight(name)} ${finalStatus === 'installed' ? 'instalado' : 'reparado'} correctamente.`,
-    );
-
-    results.push({ name, status: finalStatus, path: targetDir });
-
-    if (data.dependencies.length > 0 && finalStatus === 'installed') {
-      console.log(
-        `   ${logger.subtle('└─ Requiere:')} ${logger.highlight(data.dependencies.join(', '))}`,
-      );
+    // G. REGISTRAR RESULTADO
+    if (installedCount > 0) {
+      results.push({ name, status: 'installed' });
+      spinner.succeed(`${theme.highlight(name)} agregado.`);
+    } else {
+      results.push({ name, status: 'skipped' });
+      spinner.info(`${theme.highlight(name)} ya existe. (Saltado)`);
     }
 
+    // Reiniciar spinner para el siguiente ciclo
     spinner.start();
   } catch (error) {
-    spinner.fail(`Falló al procesar ${name}`);
-    console.error(error);
+    if (parent) throw error; // Si es dependencia, rompemos la cadena hacia arriba
+    spinner.fail(`Error al procesar ${name}`);
+    console.error(
+      theme.muted(error instanceof Error ? error.message : String(error)),
+    );
   }
 }
 
-function checkFilesIntegrity(
-  targetDir: string,
-  filesToCheck: Array<{ name: string }>,
-): { status: 'ok' | 'missing_dir' | 'missing_files' } {
-  if (!fs.existsSync(targetDir)) return { status: 'missing_dir' };
-
-  const missingFiles = filesToCheck.filter((file) => {
-    return !fs.existsSync(path.join(targetDir, file.name));
-  });
-
-  if (missingFiles.length > 0) return { status: 'missing_files' };
-  return { status: 'ok' };
-}
-
-function printSummary(results: InstallResult[]) {
-  logger.break();
-
-  if (results.length === 0) return;
-
+function printSummary(results: any[]) {
   const installed = results.filter((r) => r.status === 'installed');
-  const repaired = results.filter((r) => r.status === 'repaired');
   const skipped = results.filter((r) => r.status === 'skipped');
 
-  if (installed.length > 0) {
-    console.log(theme.success('Instalados correctamente:'));
-    installed.forEach((r) => {
-      console.log(
-        `  ${theme.success(theme.icons.check)} ${theme.highlight(r.name.padEnd(15))} ` +
-          `${theme.muted(theme.icons.arrow)} ${theme.muted(path.relative(process.cwd(), r.path))}`,
-      );
-    });
-    logger.break();
-  }
+  logger.break();
 
-  if (repaired.length > 0) {
-    console.log(theme.warning('Reparados (archivos restaurados):'));
-    repaired.forEach((r) => {
-      console.log(
-        `  ${theme.warning(theme.icons.bullet)} ${theme.highlight(r.name)}`,
-      );
-    });
-    logger.break();
+  if (installed.length > 0) {
+    console.log(
+      theme.success(`✨ ${installed.length} componentes instalados con éxito.`),
+    );
   }
 
   if (skipped.length > 0) {
-    console.log(theme.primary('Sin cambios (ya actualizados):'));
-    skipped.forEach((r) => {
-      console.log(
-        `  ${theme.primary(theme.icons.bullet)} ${theme.muted(r.name)}`,
-      );
-    });
-    logger.break();
+    console.log(
+      theme.muted(
+        `ℹ️  ${skipped.length} componentes omitidos porque ya existían.`,
+      ),
+    );
   }
 
-  console.log(theme.highlight('  Todo listo. Happy coding! 🚀'));
-  logger.break();
+  console.log(theme.text('🎉 Happy coding!'));
+}
+
+function getPackageManager() {
+  const ua = process.env.npm_config_user_agent;
+  if (ua?.startsWith('pnpm')) return 'pnpm';
+  if (ua?.startsWith('yarn')) return 'yarn';
+  if (ua?.startsWith('bun')) return 'bun';
+  return 'npm';
 }

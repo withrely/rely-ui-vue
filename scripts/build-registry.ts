@@ -8,9 +8,11 @@ const __dirname = path.dirname(__filename);
 const TEMPLATES_DIR = path.resolve(__dirname, '../templates');
 const REGISTRY_DIR = path.resolve(__dirname, '../public/registry');
 
+type RegistryItemType = 'components:ui' | 'components:lib' | 'components:core';
+
 interface RegistryItem {
   name: string;
-  type: 'components:ui' | 'components:core';
+  type: RegistryItemType;
   dependencies: string[];
   registryDependencies: string[];
   files: Array<{
@@ -19,10 +21,18 @@ interface RegistryItem {
   }>;
 }
 
+interface MetaFile {
+  type?: RegistryItemType;
+  dependencies?: {
+    external?: string[];
+    registry?: string[];
+  };
+}
+
 async function buildComponent(
   componentName: string,
   componentPath: string,
-  type: 'components:ui' | 'components:core',
+  defaultType: RegistryItemType,
 ) {
   if (!fs.statSync(componentPath).isDirectory()) return;
 
@@ -30,7 +40,7 @@ async function buildComponent(
     return (
       !file.startsWith('.') &&
       file !== 'meta.ts' &&
-      (file.endsWith('.vue') || file.endsWith('.ts'))
+      (file.endsWith('.vue') || file.endsWith('.ts') || file.endsWith('.js'))
     );
   });
 
@@ -38,31 +48,39 @@ async function buildComponent(
 
   let dependencies: string[] = [];
   let registryDependencies: string[] = [];
+  let componentType: RegistryItemType = defaultType;
+
   const metaPath = path.join(componentPath, 'meta.ts');
 
   if (fs.existsSync(metaPath)) {
     try {
+      // Import dinámico del archivo meta.ts
       const metaUrl = pathToFileURL(metaPath).href;
       const metaModule = await import(metaUrl);
-      const meta = metaModule.default || metaModule;
+      const meta: MetaFile = metaModule.default || metaModule;
 
-      if (meta.dependencies?.core) {
-        registryDependencies = [
-          ...registryDependencies,
-          ...meta.dependencies.core,
-        ];
-      }
       if (meta.dependencies?.external) {
-        dependencies = [...dependencies, ...meta.dependencies.external];
+        dependencies.push(...meta.dependencies.external);
+      }
+
+      if (meta.dependencies?.registry) {
+        registryDependencies.push(...meta.dependencies.registry);
+      }
+
+      if (meta.type) {
+        componentType = meta.type;
       }
     } catch (error) {
-      console.warn(`⚠️  No se pudo leer meta.ts en ${componentName}`, error);
+      console.warn(
+        `⚠️  Advertencia: Error al leer meta.ts en ${componentName}`,
+        error,
+      );
     }
   }
 
   const payload: RegistryItem = {
     name: componentName,
-    type,
+    type: componentType,
     dependencies,
     registryDependencies,
     files: files.map((file) => ({
@@ -74,11 +92,11 @@ async function buildComponent(
   const outputPath = path.join(REGISTRY_DIR, `${componentName}.json`);
   fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2));
 
-  console.log(`✅ ${componentName} -> public/registry/${componentName}.json`);
+  console.log(`✅ ${componentName} \t-> [${componentType}]`);
 }
 
 async function main() {
-  console.log('🏗️  Iniciando construcción del Registry...');
+  console.log('🏗️  Iniciando construcción del Registry...\n');
 
   if (fs.existsSync(REGISTRY_DIR)) {
     fs.rmSync(REGISTRY_DIR, { recursive: true, force: true });
@@ -90,14 +108,12 @@ async function main() {
     process.exit(1);
   }
 
-  const coreDir = path.join(TEMPLATES_DIR, 'core');
-  if (fs.existsSync(coreDir)) {
-    const coreItems = fs.readdirSync(coreDir);
-    for (const item of coreItems) {
-      await buildComponent(item, path.join(coreDir, item), 'components:core');
+  const libDir = path.join(TEMPLATES_DIR, 'lib');
+  if (fs.existsSync(libDir)) {
+    const libItems = fs.readdirSync(libDir);
+    for (const item of libItems) {
+      await buildComponent(item, path.join(libDir, item), 'components:lib');
     }
-  } else {
-    console.warn('⚠️  No se encontró la carpeta templates/core');
   }
 
   const componentsDir = path.join(TEMPLATES_DIR, 'components');
@@ -110,11 +126,20 @@ async function main() {
         'components:ui',
       );
     }
-  } else {
-    console.warn('⚠️  No se encontró la carpeta templates/components');
   }
 
-  console.log('\n✨ Registry construido en /public/registry');
+  const coreDir = path.join(TEMPLATES_DIR, 'core');
+  if (fs.existsSync(coreDir)) {
+    const coreItems = fs.readdirSync(coreDir);
+    for (const item of coreItems) {
+      await buildComponent(item, path.join(coreDir, item), 'components:core');
+    }
+  }
+
+  console.log('\n✨ Registry construido exitosamente en /public/registry');
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error('❌ Error fatal:', err);
+  process.exit(1);
+});

@@ -1,36 +1,80 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import chalk from 'chalk';
 import { theme } from './theme';
+import { logger } from './logger';
 
-export function checkVueProject() {
+function getPackageJson() {
   const cwd = process.cwd();
   const pkgPath = path.join(cwd, 'package.json');
+  if (!fs.existsSync(pkgPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  } catch (error) {
+    return null;
+  }
+}
 
-  if (!fs.existsSync(pkgPath)) {
+export function checkVueProject() {
+  const pkg = getPackageJson();
+  if (!pkg) {
+    logger.break();
+    logger.error('No se encontró package.json.');
     console.log(
-      chalk.red(
-        `${theme.error(theme.icons.error)} No se encontró package.json. Asegúrate de estar en la raíz de tu proyecto.`,
-      ),
+      theme.muted('   Asegúrate de estar en la raíz de tu proyecto.'),
     );
     process.exit(1);
   }
 
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-  const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const isVue = deps['vue'];
+  const isNuxt = deps['nuxt'];
+  const isAstro = deps['astro'];
+  const isLaravel = deps['laravel-vite-plugin'];
 
-  if (!allDeps.vue && !allDeps.nuxt) {
+  if (!isVue && !isNuxt && !isAstro && !isLaravel) {
+    logger.break();
+    logger.error('Entorno no compatible detectado.');
     console.log(
-      chalk.red(
-        `${theme.error(theme.icons.error)} Este proyecto no parece usar Vue.js.`,
-      ),
-    );
-    console.log(
-      chalk.yellow(
-        `  ${theme.info(theme.icons.info)} Instala Vue primero o ejecuta este comando en un proyecto Vue.`,
-      ),
+      theme.muted('   Este proyecto no parece tener Vue.js instalado.'),
     );
     process.exit(1);
+  }
+}
+
+export function checkTailwindConfig() {
+  const pkg = getPackageJson();
+  if (!pkg) return;
+
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const isVite = !!deps['vite'];
+  const hasTailwind = !!deps['tailwindcss'];
+  const hasTailwindVitePlugin = !!deps['@tailwindcss/vite'];
+
+  if (!hasTailwind) {
+    logger.break();
+    console.log(
+      theme.warning(`⚠️  ${theme.highlight('Tailwind CSS')} no detectado.`),
+    );
+    console.log(
+      theme.muted(
+        '   Los componentes se instalarán, pero se verán sin estilos.',
+      ),
+    );
+    return;
+  }
+
+  if (isVite && !hasTailwindVitePlugin) {
+    const hasPostCss = !!deps['postcss'] || !!deps['autoprefixer'];
+    if (!hasPostCss) {
+      logger.break();
+      console.log(
+        theme.warning(`⚠️  Proyecto Vite sin plugin de Tailwind v4.`),
+      );
+      console.log(theme.muted('   Sugerimos instalar:'));
+      // CORRECCIÓN: Separamos los comandos para mayor claridad
+      console.log(theme.primary('   npm i tailwindcss'));
+      console.log(theme.primary('   npm i -D @tailwindcss/vite'));
+    }
   }
 }
 
@@ -38,42 +82,36 @@ export function checkAliasConfig() {
   const cwd = process.cwd();
   const tsconfigPath = path.join(cwd, 'tsconfig.json');
   const jsconfigPath = path.join(cwd, 'jsconfig.json');
-
   const configPath = fs.existsSync(tsconfigPath)
     ? tsconfigPath
     : fs.existsSync(jsconfigPath)
       ? jsconfigPath
       : null;
 
-  if (!configPath) {
-    console.log(
-      chalk.yellow(
-        `  ${theme.warning(theme.icons.warn)} No se encontró tsconfig.json. Asegúrate de tener configurados los alias.`,
-      ),
-    );
-    return;
-  }
+  if (!configPath) return;
 
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const rawContent = fs.readFileSync(configPath, 'utf-8');
+    const jsonContent = rawContent.replace(
+      /\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g,
+      (m, g) => (g ? '' : m),
+    );
+    const config = JSON.parse(jsonContent);
     const paths = config.compilerOptions?.paths || {};
 
-    if (!paths['@/*'] && !paths['@']) {
+    const hasAlias = Object.keys(paths).some(
+      (alias) => alias === '@/*' || alias === '@',
+    );
+
+    if (!hasAlias) {
+      logger.break();
       console.log(
-        chalk.yellow(
-          `\n  ${theme.warning(theme.icons.warn)} Advertencia de Configuración:`,
+        theme.warning(
+          `⚠️  Falta el alias ${theme.highlight('@/')} en ${path.basename(configPath)}.`,
         ),
       );
-      console.log(
-        `   Los componentes usan el alias ${chalk.cyan("'@/'")} para importarse entre sí.`,
-      );
-      console.log(
-        `   No detectamos este alias en tu ${chalk.bold('compilerOptions.paths')}.`,
-      );
-      console.log(
-        `   Si ves errores de importación, agrega esto a tu ${chalk.bold('tsconfig.json')}:\n`,
-      );
-      console.log(chalk.dim(`   "paths": {\n     "@/*": ["./src/*"]\n   }\n`));
+      console.log(theme.muted('   Agrega esto a "compilerOptions.paths":'));
+      console.log(theme.primary('   "@/*": ["./src/*"]'));
     }
-  } catch (e) {}
+  } catch (error) {}
 }

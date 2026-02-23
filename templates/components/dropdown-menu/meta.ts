@@ -1,9 +1,9 @@
 import type { ComponentMeta } from '../../../types';
 
 export default {
-  type: 'components:ui',
+  type: 'components:lib',
   dependencies: {
-    external: ['class-variance-authority'],
-    registry: ['utils', 'primitive'],
+    external: ['clsx', 'tailwind-merge', 'reka-ui'],
+    registry: [],
   },
 } satisfies ComponentMeta;
