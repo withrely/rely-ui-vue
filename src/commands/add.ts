@@ -9,7 +9,7 @@ import { logger } from '../utils/logger';
 import { theme } from '../utils/theme';
 
 // ⚠️ CAMBIAR A URL REAL EN PROD
-const REGISTRY_BASE_URL = 'http://localhost:1234/registry';
+const REGISTRY_BASE_URL = 'https://withrely.github.io/rely-ui-vue/registry';
 
 // 1. Definimos la forma de los datos (Para arreglar el error 'unknown')
 type RegistryType = 'components:ui' | 'components:core' | 'components:lib';
