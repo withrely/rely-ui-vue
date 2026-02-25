@@ -117,7 +117,7 @@ export async function init() {
   try {
     // 5. Guardar/Actualizar rely.json
     const config: Config = {
-      $schema: 'https://yxsifdev.github.io/rely-ui-vue/schema.json',
+      $schema: 'https://imhvit.github.io/rely-ui-vue/schema.json',
       style: existingConfig.style || 'default',
       tailwind: {
         config: existingConfig.tailwind?.config || 'tailwind.config.js',
