@@ -4,6 +4,6 @@ export default {
   type: 'components:ui',
   dependencies: {
     external: ['class-variance-authority'],
-    registry: ['utils', 'primitive'],
+    registry: ['utils'],
   },
 } satisfies ComponentMeta;
